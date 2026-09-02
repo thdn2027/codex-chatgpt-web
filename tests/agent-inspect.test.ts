@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inspectAgentCapability } from "../src/agent-inspect";
+import { inspectAgentCapability, repairAgentCapability } from "../src/agent-inspect";
 import { defaultConfig, saveConfig } from "../src/config";
+import { installCodexIntegration } from "../src/codex-integration";
 
 const roots: string[] = [];
 
@@ -34,10 +35,11 @@ function writeCompatibilityConfig(codexHome: string): void {
   );
 }
 
-function saveCompatibilityAppConfig(): void {
+function saveCompatibilityAppConfig() {
   const appConfig = defaultConfig("browser-only");
   appConfig.subagentProtocol = "compatibility-v1";
   saveConfig(appConfig);
+  return appConfig;
 }
 
 afterEach(() => {
@@ -134,5 +136,29 @@ describe("agent capability inspection", () => {
     expect(inspection.nextSteps).toContain(
       "If spawn_agent is still absent, discard the current Codex task and create a fresh task because affected Codex versions pin multi-agent protocol at thread creation.",
     );
+  });
+
+  test("repairs Compatibility V1 by reapplying the managed surface and invalidating stale model cache", () => {
+    const { codexHome } = fixture();
+    const appConfig = saveCompatibilityAppConfig();
+    writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.6-sol"\n');
+    installCodexIntegration(appConfig);
+    writeFileSync(
+      join(codexHome, "models_cache.json"),
+      JSON.stringify({ models: [{ slug: "chatgpt-web/high", multi_agent_version: "v2" }] }),
+    );
+    expect(existsSync(join(codexHome, "models_cache.json"))).toBe(true);
+
+    const repaired = repairAgentCapability();
+
+    expect(repaired.protocol).toBe("compatibility-v1");
+    expect(repaired.codexRestartRequired).toBe(true);
+    expect(repaired.newTaskRequired).toBe(true);
+    expect(existsSync(join(codexHome, "models_cache.json"))).toBe(false);
+    expect(repaired.inspection.config).toEqual({
+      multi_agent: true,
+      multi_agent_v2: false,
+      max_depth: 2,
+    });
   });
 });
