@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { inspectCodexIntegration, getCodexConfigPath, getCodexModelsCachePath, readCodexSubagentProtocol } from "./codex-integration";
 import type { SubagentProtocol } from "./config";
 import { runCommand } from "./process";
@@ -23,6 +24,14 @@ export interface ParsedCodexAgentConfig {
   maxDepth?: number;
 }
 
+export interface RecentSessionAgentState {
+  multiAgentVersion?: string;
+  model?: string;
+  spawnAgentSeen: boolean;
+  waitAgentSeen: boolean;
+  path?: string;
+}
+
 export interface AgentCapabilityInput {
   protocol: SubagentProtocol;
   configText: string;
@@ -30,6 +39,7 @@ export interface AgentCapabilityInput {
   integrationActive: boolean;
   runtimeCatalog?: RuntimeModelCatalog;
   runtimeCatalogSource?: "codex-debug-models" | "models-cache";
+  recentSession?: RecentSessionAgentState;
   codexVersion?: string;
   bundledCodexVersion?: string;
 }
@@ -44,6 +54,7 @@ export interface AgentCapabilityReport {
     slug: string;
     multiAgentVersion?: string;
   };
+  recentSession?: RecentSessionAgentState;
   routedV1Models: string[];
   blockers: string[];
   warnings: string[];
@@ -162,6 +173,66 @@ function modelRows(catalog?: RuntimeModelCatalog): RuntimeModel[] {
     : [];
 }
 
+function findNestedString(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedString(item, key);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  const object = value as Record<string, unknown>;
+  const direct = object[key];
+  if (typeof direct === "string") return direct;
+  for (const child of Object.values(object)) {
+    const found = findNestedString(child, key);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+export function extractLatestSessionAgentState(lines: string[]): RecentSessionAgentState | undefined {
+  let multiAgentVersion: string | undefined;
+  let model: string | undefined;
+  let spawnAgentSeen = false;
+  let waitAgentSeen = false;
+
+  for (const line of lines) {
+    if (line.includes("spawn_agent")) spawnAgentSeen = true;
+    if (line.includes("wait_agent")) waitAgentSeen = true;
+  }
+
+  for (let index = lines.length - 1; index >= 0 && (!multiAgentVersion || !model); index -= 1) {
+    const line = lines[index]?.trim();
+    if (!line) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!multiAgentVersion) {
+      const candidate = findNestedString(value, "multi_agent_version");
+      if (candidate === "v1" || candidate === "v2" || candidate === "disabled") {
+        multiAgentVersion = candidate;
+      }
+    }
+    if (!model) {
+      const candidate = findNestedString(value, "model");
+      if (candidate) model = candidate;
+    }
+  }
+
+  if (!multiAgentVersion && !model && !spawnAgentSeen && !waitAgentSeen) return undefined;
+  return {
+    ...(multiAgentVersion ? { multiAgentVersion } : {}),
+    ...(model ? { model } : {}),
+    spawnAgentSeen,
+    waitAgentSeen,
+  };
+}
+
 export function analyzeAgentCapability(input: AgentCapabilityInput): AgentCapabilityReport {
   const config = parseCodexAgentConfig(input.configText);
   const rows = modelRows(input.runtimeCatalog);
@@ -217,6 +288,11 @@ export function analyzeAgentCapability(input: AgentCapabilityInput): AgentCapabi
       `PATH Codex (${input.codexVersion}) differs from ChatGPT.app bundled Codex (${input.bundledCodexVersion})`,
     );
   }
+  if (input.recentSession?.multiAgentVersion === "disabled") {
+    warnings.push(
+      "The most recent Codex session persisted multi-agent backend is disabled; start a new thread after the route/catalog is ready",
+    );
+  }
   warnings.push("Start a new Codex thread after changing the subagent protocol or model catalog; existing threads keep their original multi-agent backend");
 
   return {
@@ -226,6 +302,7 @@ export function analyzeAgentCapability(input: AgentCapabilityInput): AgentCapabi
     config,
     ...(input.runtimeCatalogSource ? { runtimeCatalogSource: input.runtimeCatalogSource } : {}),
     ...(selectedModel ? { selectedModel } : {}),
+    ...(input.recentSession ? { recentSession: input.recentSession } : {}),
     routedV1Models,
     blockers,
     warnings,
@@ -272,11 +349,57 @@ function runtimeCatalog(): {
   return catalog ? { catalog, source: "models-cache" } : {};
 }
 
+function newestSessionFiles(root: string, limit = 12): string[] {
+  if (!existsSync(root)) return [];
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+  const walk = (directory: string): void => {
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(path);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        try {
+          files.push({ path, mtimeMs: statSync(path).mtimeMs });
+        } catch {
+          // Session may be rotated between directory enumeration and stat.
+        }
+      }
+    }
+  };
+  walk(root);
+  return files
+    .toSorted((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, limit)
+    .map(file => file.path);
+}
+
+function recentSessionState(): RecentSessionAgentState | undefined {
+  const sessionsRoot = join(dirname(getCodexConfigPath()), "sessions");
+  for (const path of newestSessionFiles(sessionsRoot)) {
+    let content: string;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    const state = extractLatestSessionAgentState(content.split(/\r?\n/));
+    if (state) return { ...state, path };
+  }
+  return undefined;
+}
+
 export function inspectAgentCapability(): AgentCapabilityReport {
   const configPath = getCodexConfigPath();
   const configText = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
   const integration = inspectCodexIntegration();
   const runtime = runtimeCatalog();
+  const recentSession = recentSessionState();
   const bundledBinary = "/Applications/ChatGPT.app/Contents/Resources/codex";
   return analyzeAgentCapability({
     protocol: readCodexSubagentProtocol(),
@@ -285,6 +408,7 @@ export function inspectAgentCapability(): AgentCapabilityReport {
     integrationActive: integration.active,
     ...(runtime.catalog ? { runtimeCatalog: runtime.catalog } : {}),
     ...(runtime.source ? { runtimeCatalogSource: runtime.source } : {}),
+    ...(recentSession ? { recentSession } : {}),
     codexVersion: commandOutput("codex", ["--version"]),
     ...(existsSync(bundledBinary)
       ? { bundledCodexVersion: commandOutput(bundledBinary, ["--version"]) }
@@ -303,6 +427,12 @@ export function formatAgentInspection(report: AgentCapabilityReport): string {
     `Routed V1 models: ${report.routedV1Models.join(", ") || "none"}`,
     ...(report.selectedModel
       ? [`Selected model: ${report.selectedModel.slug} (${report.selectedModel.multiAgentVersion ?? "no multi-agent metadata"})`]
+      : []),
+    ...(report.recentSession
+      ? [
+          `Recent session: model=${report.recentSession.model ?? "unknown"}, multi_agent_version=${report.recentSession.multiAgentVersion ?? "unknown"}, spawn_agent=${report.recentSession.spawnAgentSeen}, wait_agent=${report.recentSession.waitAgentSeen}`,
+          ...(report.recentSession.path ? [`Recent session file: ${report.recentSession.path}`] : []),
+        ]
       : []),
     ...report.blockers.map(blocker => `BLOCKER: ${blocker}`),
     ...report.warnings.map(warning => `NOTE: ${warning}`),
