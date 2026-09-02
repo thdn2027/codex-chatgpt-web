@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   analyzeAgentCapability,
+  extractLatestSessionAgentState,
   parseCodexAgentConfig,
   type RuntimeModelCatalog,
 } from "../src/agent-inspect";
@@ -99,5 +100,53 @@ describe("agent capability inspection", () => {
       slug: "chatgpt-web/high",
       multiAgentVersion: "v1",
     });
+  });
+
+  test("extracts the persisted backend from recent rollout JSONL and sees agent calls", () => {
+    const state = extractLatestSessionAgentState([
+      JSON.stringify({
+        timestamp: "2026-09-02T01:00:00Z",
+        type: "session_meta",
+        payload: { model: "chatgpt-web/high", multi_agent_version: "disabled" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-09-02T01:00:01Z",
+        type: "turn_context",
+        payload: { model: "chatgpt-web/high", multi_agent_version: "v1" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-09-02T01:00:02Z",
+        type: "response_item",
+        payload: { type: "function_call", name: "spawn_agent" },
+      }),
+    ]);
+
+    expect(state).toEqual({
+      multiAgentVersion: "v1",
+      model: "chatgpt-web/high",
+      spawnAgentSeen: true,
+      waitAgentSeen: false,
+    });
+  });
+
+  test("warns when a recent persisted thread is disabled while a fresh thread is ready", () => {
+    const report = analyzeAgentCapability({
+      protocol: "compatibility-v1",
+      configText: compatibilityV1Config,
+      integrationInstalled: true,
+      integrationActive: true,
+      runtimeCatalog: catalog(),
+      codexVersion: "codex-cli 0.142.5",
+      recentSession: {
+        multiAgentVersion: "disabled",
+        model: "chatgpt-web/high",
+        spawnAgentSeen: false,
+        waitAgentSeen: false,
+      },
+    });
+
+    expect(report.readyForFreshThread).toBe(true);
+    expect(report.recentSession?.multiAgentVersion).toBe("disabled");
+    expect(report.warnings.join("\n")).toContain("persisted multi-agent backend is disabled");
   });
 });
