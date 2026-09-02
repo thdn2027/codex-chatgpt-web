@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 import { inspectCodexIntegration, getCodexConfigPath, getCodexModelsCachePath, readCodexSubagentProtocol } from "./codex-integration";
 import type { SubagentProtocol } from "./config";
@@ -353,7 +353,7 @@ function newestSessionFiles(root: string, limit = 12): string[] {
   if (!existsSync(root)) return [];
   const files: Array<{ path: string; mtimeMs: number }> = [];
   const walk = (directory: string): void => {
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent[];
     try {
       entries = readdirSync(directory, { withFileTypes: true });
     } catch {
