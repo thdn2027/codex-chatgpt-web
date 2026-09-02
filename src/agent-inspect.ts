@@ -5,6 +5,7 @@ import {
   getCodexModelsCachePath,
   inspectCodexIntegration,
   readCodexSubagentProtocol,
+  setCodexSubagentProtocol,
 } from "./codex-integration";
 import {
   findAgentMaxDepthAssignment,
@@ -40,6 +41,13 @@ export interface AgentInspection {
   files: Record<string, boolean>;
   warnings: string[];
   nextSteps: string[];
+}
+
+export interface AgentRepairResult {
+  protocol: string;
+  codexRestartRequired: true;
+  newTaskRequired: true;
+  inspection: AgentInspection;
 }
 
 function assignmentBoolean(value: string | undefined): boolean | undefined {
@@ -154,6 +162,18 @@ export function inspectAgentCapability(): AgentInspection {
     },
     warnings,
     nextSteps,
+  };
+}
+
+export function repairAgentCapability(): AgentRepairResult {
+  const config = loadConfig();
+  const protocol = readCodexSubagentProtocol(config.subagentProtocol);
+  const journal = setCodexSubagentProtocol(config, protocol);
+  return {
+    protocol: journal.installed.subagent_protocol,
+    codexRestartRequired: true,
+    newTaskRequired: true,
+    inspection: inspectAgentCapability(),
   };
 }
 
