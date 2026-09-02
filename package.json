@@ -26,6 +26,7 @@
     "start": "bun run src/cli.ts serve",
     "setup": "bun run src/cli.ts setup",
     "doctor": "bun run src/cli.ts doctor",
+    "agent:inspect": "bun run src/agent-inspect-cli.ts",
     "dev:launcher": "bun run src/cli.ts dev launcher",
     "dev:chat": "bun run src/cli.ts dev chat",
     "test": "bun test tests/*.test.ts",
