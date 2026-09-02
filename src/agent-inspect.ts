@@ -12,6 +12,16 @@ import {
   findMultiAgentV2Assignment,
   splitLines,
 } from "./codex-integration-document";
+import { CHATGPT_WEB_MODEL_PREFIX } from "./chatgpt-web-models";
+
+type JsonObject = Record<string, unknown>;
+
+export interface AgentCatalogModel {
+  slug: string;
+  multi_agent_version?: string;
+  supported_in_api?: boolean;
+  visibility?: string;
+}
 
 export interface AgentInspection {
   configPath: string;
@@ -23,6 +33,10 @@ export interface AgentInspection {
     max_depth?: number;
   };
   integration: ReturnType<typeof inspectCodexIntegration>;
+  catalog?: {
+    path: string;
+    webModels: AgentCatalogModel[];
+  };
   files: Record<string, boolean>;
   warnings: string[];
 }
@@ -46,6 +60,46 @@ function readCodexAgentState(path: string): AgentInspection["config"] {
   };
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readAgentCatalog(path: string): AgentInspection["catalog"] | undefined {
+  if (!existsSync(path)) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return { path, webModels: [] };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { path, webModels: [] };
+  const models = (value as JsonObject).models;
+  if (!Array.isArray(models)) return { path, webModels: [] };
+  const webModels = models.flatMap(model => {
+    if (!model || typeof model !== "object" || Array.isArray(model)) return [];
+    const record = model as JsonObject;
+    const slug = optionalString(record.slug);
+    if (!slug?.startsWith(CHATGPT_WEB_MODEL_PREFIX)) return [];
+    return [{
+      slug,
+      ...(optionalString(record.multi_agent_version) === undefined
+        ? {}
+        : { multi_agent_version: optionalString(record.multi_agent_version) }),
+      ...(optionalBoolean(record.supported_in_api) === undefined
+        ? {}
+        : { supported_in_api: optionalBoolean(record.supported_in_api) }),
+      ...(optionalString(record.visibility) === undefined
+        ? {}
+        : { visibility: optionalString(record.visibility) }),
+    } satisfies AgentCatalogModel];
+  });
+  return { path, webModels };
+}
+
 export function inspectAgentCapability(): AgentInspection {
   const config = loadConfig();
   const protocol = readCodexSubagentProtocol(config.subagentProtocol);
@@ -53,11 +107,11 @@ export function inspectAgentCapability(): AgentInspection {
   const modelsCachePath = getCodexModelsCachePath();
   const integration = inspectCodexIntegration();
   const codexAgentState = readCodexAgentState(codexConfigPath);
+  const catalog = readAgentCatalog(modelsCachePath);
   const warnings: string[] = [];
 
   if (!integration.installed) warnings.push("Codex integration route is not installed");
   if (!existsSync(codexConfigPath)) warnings.push(`Codex config is missing: ${codexConfigPath}`);
-  if (!existsSync(modelsCachePath)) warnings.push(`Codex models cache is missing: ${modelsCachePath}`);
 
   if (protocol === "compatibility-v1") {
     if (codexAgentState.multi_agent !== true) {
@@ -69,6 +123,13 @@ export function inspectAgentCapability(): AgentInspection {
     if ((codexAgentState.max_depth ?? 0) < 2) {
       warnings.push("Codex agent max_depth is below the Compatibility V1 minimum of 2");
     }
+    for (const model of catalog?.webModels ?? []) {
+      if (model.multi_agent_version !== "v1") {
+        warnings.push(
+          `Codex model cache still advertises ${model.slug} as multi_agent_version=${model.multi_agent_version ?? "missing"} while Compatibility V1 is selected`,
+        );
+      }
+    }
   }
 
   return {
@@ -77,6 +138,7 @@ export function inspectAgentCapability(): AgentInspection {
     protocol,
     config: codexAgentState,
     integration,
+    ...(catalog ? { catalog } : {}),
     files: {
       [codexConfigPath]: existsSync(codexConfigPath),
       [modelsCachePath]: existsSync(modelsCachePath),
