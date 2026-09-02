@@ -39,6 +39,7 @@ export interface AgentInspection {
   };
   files: Record<string, boolean>;
   warnings: string[];
+  nextSteps: string[];
 }
 
 function assignmentBoolean(value: string | undefined): boolean | undefined {
@@ -84,17 +85,14 @@ function readAgentCatalog(path: string): AgentInspection["catalog"] | undefined 
     const record = model as JsonObject;
     const slug = optionalString(record.slug);
     if (!slug?.startsWith(CHATGPT_WEB_MODEL_PREFIX)) return [];
+    const multiAgentVersion = optionalString(record.multi_agent_version);
+    const supportedInApi = optionalBoolean(record.supported_in_api);
+    const visibility = optionalString(record.visibility);
     return [{
       slug,
-      ...(optionalString(record.multi_agent_version) === undefined
-        ? {}
-        : { multi_agent_version: optionalString(record.multi_agent_version) }),
-      ...(optionalBoolean(record.supported_in_api) === undefined
-        ? {}
-        : { supported_in_api: optionalBoolean(record.supported_in_api) }),
-      ...(optionalString(record.visibility) === undefined
-        ? {}
-        : { visibility: optionalString(record.visibility) }),
+      ...(multiAgentVersion === undefined ? {} : { multi_agent_version: multiAgentVersion }),
+      ...(supportedInApi === undefined ? {} : { supported_in_api: supportedInApi }),
+      ...(visibility === undefined ? {} : { visibility }),
     } satisfies AgentCatalogModel];
   });
   return { path, webModels };
@@ -109,6 +107,7 @@ export function inspectAgentCapability(): AgentInspection {
   const codexAgentState = readCodexAgentState(codexConfigPath);
   const catalog = readAgentCatalog(modelsCachePath);
   const warnings: string[] = [];
+  const nextSteps: string[] = [];
 
   if (!integration.installed) warnings.push("Codex integration route is not installed");
   if (!existsSync(codexConfigPath)) warnings.push(`Codex config is missing: ${codexConfigPath}`);
@@ -130,6 +129,16 @@ export function inspectAgentCapability(): AgentInspection {
         );
       }
     }
+
+    if (!catalog) {
+      nextSteps.push(
+        "Restart Codex so it reloads the routed model catalog, then start a new task before testing subagents.",
+      );
+    } else if (warnings.length === 0 || warnings.every(warning => warning === "Codex integration route is not installed")) {
+      nextSteps.push(
+        "If spawn_agent is still absent, discard the current Codex task and create a fresh task because affected Codex versions pin multi-agent protocol at thread creation.",
+      );
+    }
   }
 
   return {
@@ -144,6 +153,7 @@ export function inspectAgentCapability(): AgentInspection {
       [modelsCachePath]: existsSync(modelsCachePath),
     },
     warnings,
+    nextSteps,
   };
 }
 
