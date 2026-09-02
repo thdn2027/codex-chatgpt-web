@@ -57,4 +57,67 @@ describe("agent capability inspection", () => {
     expect(inspection.warnings).toContain("Codex multi_agent_v2 is enabled for Compatibility V1");
     expect(inspection.warnings).toContain("Codex agent max_depth is below the Compatibility V1 minimum of 2");
   });
+
+  test("detects a stale V2 routed model cache while Compatibility V1 is selected", () => {
+    const { codexHome } = fixture();
+    const appConfig = defaultConfig("browser-only");
+    appConfig.subagentProtocol = "compatibility-v1";
+    saveConfig(appConfig);
+
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[features]",
+        "multi_agent = true",
+        "multi_agent_v2 = false",
+        "",
+        "[agents]",
+        "max_depth = 2",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(codexHome, "models_cache.json"),
+      JSON.stringify({
+        models: [
+          { slug: "chatgpt-web/high", visibility: "list", supported_in_api: true, multi_agent_version: "v2" },
+          { slug: "gpt-5.6-sol", visibility: "list", supported_in_api: true, multi_agent_version: "v1" },
+        ],
+      }),
+    );
+
+    const inspection = inspectAgentCapability();
+
+    expect(inspection.catalog?.webModels).toEqual([
+      { slug: "chatgpt-web/high", multi_agent_version: "v2", supported_in_api: true, visibility: "list" },
+    ]);
+    expect(inspection.warnings).toContain(
+      "Codex model cache still advertises chatgpt-web/high as multi_agent_version=v2 while Compatibility V1 is selected",
+    );
+  });
+
+  test("does not treat an intentionally invalidated models cache as an error", () => {
+    const { codexHome } = fixture();
+    const appConfig = defaultConfig("browser-only");
+    appConfig.subagentProtocol = "compatibility-v1";
+    saveConfig(appConfig);
+
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[features]",
+        "multi_agent = true",
+        "multi_agent_v2 = false",
+        "",
+        "[agents]",
+        "max_depth = 2",
+        "",
+      ].join("\n"),
+    );
+
+    const inspection = inspectAgentCapability();
+
+    expect(inspection.files[join(codexHome, "models_cache.json")]).toBe(false);
+    expect(inspection.warnings.some(warning => warning.includes("models cache is missing"))).toBe(false);
+  });
 });
