@@ -19,6 +19,27 @@ function fixture(): { root: string; codexHome: string; appHome: string } {
   return { root, codexHome, appHome };
 }
 
+function writeCompatibilityConfig(codexHome: string): void {
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    [
+      "[features]",
+      "multi_agent = true",
+      "multi_agent_v2 = false",
+      "",
+      "[agents]",
+      "max_depth = 2",
+      "",
+    ].join("\n"),
+  );
+}
+
+function saveCompatibilityAppConfig(): void {
+  const appConfig = defaultConfig("browser-only");
+  appConfig.subagentProtocol = "compatibility-v1";
+  saveConfig(appConfig);
+}
+
 afterEach(() => {
   delete process.env.CODEX_HOME;
   delete process.env.CODEX_CHATGPT_WEB_HOME;
@@ -28,9 +49,7 @@ afterEach(() => {
 describe("agent capability inspection", () => {
   test("reports the actual Codex feature state instead of inferring it from the requested protocol", () => {
     const { codexHome } = fixture();
-    const appConfig = defaultConfig("browser-only");
-    appConfig.subagentProtocol = "compatibility-v1";
-    saveConfig(appConfig);
+    saveCompatibilityAppConfig();
 
     writeFileSync(
       join(codexHome, "config.toml"),
@@ -60,22 +79,8 @@ describe("agent capability inspection", () => {
 
   test("detects a stale V2 routed model cache while Compatibility V1 is selected", () => {
     const { codexHome } = fixture();
-    const appConfig = defaultConfig("browser-only");
-    appConfig.subagentProtocol = "compatibility-v1";
-    saveConfig(appConfig);
-
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      [
-        "[features]",
-        "multi_agent = true",
-        "multi_agent_v2 = false",
-        "",
-        "[agents]",
-        "max_depth = 2",
-        "",
-      ].join("\n"),
-    );
+    saveCompatibilityAppConfig();
+    writeCompatibilityConfig(codexHome);
     writeFileSync(
       join(codexHome, "models_cache.json"),
       JSON.stringify({
@@ -98,26 +103,36 @@ describe("agent capability inspection", () => {
 
   test("does not treat an intentionally invalidated models cache as an error", () => {
     const { codexHome } = fixture();
-    const appConfig = defaultConfig("browser-only");
-    appConfig.subagentProtocol = "compatibility-v1";
-    saveConfig(appConfig);
-
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      [
-        "[features]",
-        "multi_agent = true",
-        "multi_agent_v2 = false",
-        "",
-        "[agents]",
-        "max_depth = 2",
-        "",
-      ].join("\n"),
-    );
+    saveCompatibilityAppConfig();
+    writeCompatibilityConfig(codexHome);
 
     const inspection = inspectAgentCapability();
 
     expect(inspection.files[join(codexHome, "models_cache.json")]).toBe(false);
     expect(inspection.warnings.some(warning => warning.includes("models cache is missing"))).toBe(false);
+    expect(inspection.nextSteps).toContain(
+      "Restart Codex so it reloads the routed model catalog, then start a new task before testing subagents.",
+    );
+  });
+
+  test("calls out thread pinning when config and routed catalog already agree", () => {
+    const { codexHome } = fixture();
+    saveCompatibilityAppConfig();
+    writeCompatibilityConfig(codexHome);
+    writeFileSync(
+      join(codexHome, "models_cache.json"),
+      JSON.stringify({
+        models: [
+          { slug: "chatgpt-web/high", visibility: "list", supported_in_api: true, multi_agent_version: "v1" },
+        ],
+      }),
+    );
+
+    const inspection = inspectAgentCapability();
+
+    expect(inspection.warnings).toEqual(["Codex integration route is not installed"]);
+    expect(inspection.nextSteps).toContain(
+      "If spawn_agent is still absent, discard the current Codex task and create a fresh task because affected Codex versions pin multi-agent protocol at thread creation.",
+    );
   });
 });
