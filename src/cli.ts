@@ -17,6 +17,7 @@ import {
   uninstallCodexIntegration,
 } from "./codex-integration";
 import { formatDoctorReport, runDoctor } from "./doctor";
+import { formatAgentInspection, inspectAgentCapability } from "./agent-inspect";
 import { runChatGptMcpMain } from "./adapters/chatgpt-web/mcp-main";
 import { runCommand } from "./process";
 import { startServer } from "./server";
@@ -36,6 +37,7 @@ Usage:
   codex-chatgpt-web setup --full --tunnel-id ID --runtime-key-file PATH [options]
   codex-chatgpt-web login
   codex-chatgpt-web doctor [--json]
+  codex-chatgpt-web agent inspect
   codex-chatgpt-web route <status|connect|disconnect>
   codex-chatgpt-web subagents <status|compatibility-v1|native>
   codex-chatgpt-web browser check
@@ -334,6 +336,13 @@ async function doctorCommand(args: string[]): Promise<void> {
   if (!report.ok) process.exitCode = 1;
 }
 
+async function agentCommand(args: string[]): Promise<void> {
+  const action = args.shift() ?? "inspect";
+  assertNoArgs(args);
+  if (action !== "inspect") throw new Error("Agent command must be: agent inspect");
+  stdout.write(formatAgentInspection(inspectAgentCapability()));
+}
+
 async function routeCommand(args: string[]): Promise<void> {
   const action = args.shift() ?? "status";
   assertNoArgs(args);
@@ -456,7 +465,7 @@ async function uninstallCommand(args: string[]): Promise<void> {
   assertNoArgs(args);
   if (launcherControl) authorizeLauncherControl("uninstall");
   if (!yes && !await confirm("Restore Codex config, stop services, and remove this installation?")) {
-    throw new Error("Uninstall cancelled");
+    throw new Error("Uninstall cancelled: acknowledgement was not provided");
   }
   const config = existsSync(getConfigPath()) ? loadConfig() : undefined;
   if (config?.browserHost === "launcher" && !launcherControl) {
@@ -499,6 +508,7 @@ async function main(): Promise<void> {
   else if (command === "setup") await setupCommand(args);
   else if (command === "login") await loginCommand(args);
   else if (command === "doctor" || command === "status") await doctorCommand(args);
+  else if (command === "agent") await agentCommand(args);
   else if (command === "route") await routeCommand(args);
   else if (command === "subagents") await subagentsCommand(args);
   else if (command === "browser") {
