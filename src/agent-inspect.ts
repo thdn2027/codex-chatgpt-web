@@ -5,7 +5,6 @@ import {
   getCodexModelsCachePath,
   inspectCodexIntegration,
   readCodexSubagentProtocol,
-  setCodexSubagentProtocol,
 } from "./codex-integration";
 import {
   findAgentMaxDepthAssignment,
@@ -41,13 +40,6 @@ export interface AgentInspection {
   files: Record<string, boolean>;
   warnings: string[];
   nextSteps: string[];
-}
-
-export interface AgentRepairResult {
-  protocol: string;
-  codexRestartRequired: true;
-  newTaskRequired: true;
-  inspection: AgentInspection;
 }
 
 function assignmentBoolean(value: string | undefined): boolean | undefined {
@@ -140,7 +132,7 @@ export function inspectAgentCapability(): AgentInspection {
 
     if (!catalog) {
       nextSteps.push(
-        "Restart Codex so it reloads the routed model catalog, then start a new task before testing subagents.",
+        "Run `codex-chatgpt-web subagents compatibility-v1`, fully restart Codex, then start a new task before testing subagents.",
       );
     } else if (warnings.length === 0 || warnings.every(warning => warning === "Codex integration route is not installed")) {
       nextSteps.push(
@@ -162,18 +154,6 @@ export function inspectAgentCapability(): AgentInspection {
     },
     warnings,
     nextSteps,
-  };
-}
-
-export function repairAgentCapability(): AgentRepairResult {
-  const config = loadConfig();
-  const protocol = readCodexSubagentProtocol(config.subagentProtocol);
-  const journal = setCodexSubagentProtocol(config, protocol);
-  return {
-    protocol: journal.installed.subagent_protocol,
-    codexRestartRequired: true,
-    newTaskRequired: true,
-    inspection: inspectAgentCapability(),
   };
 }
 
