@@ -14,3 +14,7 @@ runtime/
 launcher/build/
 launcher/release/
 launcher/artifacts/
+# This project locks with bun.lock. A stray npm/yarn lockfile would pin a second,
+# silently divergent dependency graph (and re-introduce versions bun.lock has moved past).
+package-lock.json
+yarn.lock
