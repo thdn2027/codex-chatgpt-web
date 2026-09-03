@@ -176,6 +176,13 @@ codex-chatgpt-web subagents compatibility-v1
 codex-chatgpt-web subagents native
 ```
 
+If subagents still do not spawn, `codex-chatgpt-web agent inspect` reports Codex's actual
+multi-agent state, the routed model catalog, and the next step to take:
+
+```bash
+codex-chatgpt-web agent inspect
+```
+
 ## Limitations and security
 
 - This is unofficial browser automation, not an OpenAI API. ChatGPT UI changes can break selectors;

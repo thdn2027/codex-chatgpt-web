@@ -28,12 +28,18 @@ Do not mix these two workstreams. Agent capability failures should be localized 
 7. wait_agent lifecycle
 
 ## Phase checklist
-- [ ] Add agent diagnostics command
-- [ ] Inspect model cache/catalog
-- [ ] Verify multi_agent_version
+- [x] Add agent diagnostics command — `codex-chatgpt-web agent inspect`
+- [x] Inspect model cache/catalog — reported under `catalog.webModels`
+- [x] Verify multi_agent_version — warns per routed model when it is not `v1` under Compatibility V1
 - [ ] Add pre-lifecycle smoke test
 - [ ] Test spawn_agent
 - [ ] Investigate upstream lifecycle only if spawn_agent executes
+
+Steps 1-3 of the debug order are now one command. It reads Codex's real
+`[features]`/`[agents]` state through the same TOML helpers setup writes with, so a
+drifted config cannot read back as healthy. Note the thread-pinning next step it
+emits: affected Codex versions pin the multi-agent protocol at thread creation, so a
+correct config still requires a fresh task before spawn_agent can appear.
 
 ## Cross-workstream invariant
 

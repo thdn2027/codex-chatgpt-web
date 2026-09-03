@@ -163,6 +163,13 @@ codex-chatgpt-web subagents compatibility-v1
 codex-chatgpt-web subagents native
 ```
 
+如果子代理仍然无法启动，`codex-chatgpt-web agent inspect` 会报告 Codex 实际的
+multi-agent 状态、路由模型目录，以及下一步该做什么：
+
+```bash
+codex-chatgpt-web agent inspect
+```
+
 ## 限制和安全性
 
 - 这是非官方浏览器自动化，并非 OpenAI API。ChatGPT UI 变更可能破坏选择器；发生变化时会明确

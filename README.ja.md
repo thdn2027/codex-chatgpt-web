@@ -173,6 +173,13 @@ codex-chatgpt-web subagents compatibility-v1
 codex-chatgpt-web subagents native
 ```
 
+サブエージェントがそれでも起動しない場合、`codex-chatgpt-web agent inspect` が Codex の実際の
+multi-agent 状態、ルーティングされたモデルカタログ、次に取るべき手順を報告します。
+
+```bash
+codex-chatgpt-web agent inspect
+```
+
 ## 制限とセキュリティ
 
 - これは非公式のブラウザー自動化であり、OpenAI API ではありません。ChatGPT UI の変更によりセレクターが壊れる可能性があります。

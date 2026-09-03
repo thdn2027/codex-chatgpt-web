@@ -115,6 +115,26 @@ approval review**, disable that optional Codex review setting and restart Codex.
 sandbox and explicit approvals still apply; this only prevents an unavailable native model from
 being inserted as an extra reviewer after the Web tool call already completed.
 
+## Subagents do not spawn
+
+If `spawn_agent` never appears even though Compatibility V1 is selected, do not start by reading
+config files. Run:
+
+```bash
+codex-chatgpt-web agent inspect
+```
+
+It reports the protocol recorded in the integration journal, Codex's actual
+`[features]`/`[agents]` state, whether the integration route is installed and active, and which
+routed models the Codex model cache still advertises at which `multi_agent_version`. Act on its
+`warnings` first, then its `nextSteps`.
+
+The most common cause is not a wrong setting. Affected Codex versions pin the multi-agent protocol
+when a task starts, so a config fixed after the task began will not take effect: fully restart Codex
+and begin a new task. If the inspection reports a routed model still advertising
+`multi_agent_version` other than `v1` under Compatibility V1, re-run
+`codex-chatgpt-web subagents compatibility-v1` and restart Codex before testing again.
+
 ## `Reconnecting`, `stream disconnected`, or `ChatGPT failed`
 
 These are result boundaries, not one diagnosis. The bridge uses them when it cannot prove a complete
