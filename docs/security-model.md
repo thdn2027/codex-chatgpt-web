@@ -88,8 +88,17 @@ The launcher keeps ChatGPT login, identity-provider navigation, and model turns 
 Electron partition. Allowed login popups are adopted into an in-launcher `WebContentsView` that
 shares that partition; unrelated external links remain outside it. A visible composer alone is not
 authentication evidence: the launcher also requires a valid server session and an exact Temporary
-Chat URL before setup can continue. No cookies, local storage, or browser profile are copied from an
-external browser.
+Chat URL before setup can continue. Ordinary sign-in copies no cookies, local storage, or browser
+profile from an external browser.
+
+macOS passkey sign-in is the single audited exception, because a platform passkey challenge cannot be
+answered inside Electron. The user opts in explicitly; a dedicated Chrome instance in an isolated
+normal-browser profile performs the challenge, and only the resulting cookies and localStorage are
+imported. The captured state lives in an owner-only `0700` transfer directory, is accepted only with a
+capture-evidence marker proving a complete capture from that isolated profile inside the sign-in
+window, and is removed after import succeeds or fails. The owned partition is cleared before the
+import and reset if the import fails, so a partial session is never left authenticated. The transfer
+is one-directional: the owned partition is never exported to another browser.
 
 ### Cross-turn data leakage
 

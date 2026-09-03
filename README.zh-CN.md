@@ -93,7 +93,9 @@ irm https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install
 完成完整 harness 设置。
 
 打包后的启动器在其内置浏览器中完成登录并运行 ChatGPT 模型轮次，不需要模型 API 密钥、已安装的
-Chrome/Chromium、系统级 Node/Bun，也不会由本项目另行下载浏览器。
+Chrome/Chromium、系统级 Node/Bun，也不会由本项目另行下载浏览器。唯一的例外是 macOS 的
+**使用通行密钥** 登录：平台通行密钥验证无法在 Electron 内完成，因此需要已安装的 Google Chrome。
+详见 [故障排查](TROUBLESHOOTING.md)。
 
 **从源码运行**
 

@@ -100,7 +100,10 @@ only Luna, while Pro appears only when the signed-in account exposes it. The sep
 is optional and guides the full-harness setup without terminal commands.
 
 The packaged launcher keeps sign-in and ChatGPT model turns in its embedded browser. It needs no
-model API key, installed Chrome/Chromium, system Node/Bun, or project-managed browser download.
+model API key, installed Chrome/Chromium, system Node/Bun, or project-managed browser download. The
+one exception is macOS **Use passkey** sign-in, which needs an installed Google Chrome because a
+platform passkey challenge cannot be answered inside Electron; see
+[Troubleshooting](TROUBLESHOOTING.md).
 
 **Run from source**
 

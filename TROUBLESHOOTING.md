@@ -65,9 +65,16 @@ window does not automatically transfer that session.
   running.
 - If the account offers **Try another way**, an alternate authentication method can avoid a
   platform-passkey limitation.
-- Passkey-only macOS accounts have a known open issue: [#209](https://github.com/miuuyy/codex-chatgpt-web/issues/209).
-  If no alternate method exists, follow that issue rather than repeatedly deleting the browser
-  profile; there is no safe generic workaround to claim yet.
+- Passkey-only macOS accounts have a supported path since v4.0.8: choose **Use passkey** in the
+  launcher toolbar. It opens a dedicated Google Chrome window, because Electron cannot answer a
+  platform passkey challenge. Complete the challenge there, wait until Temporary Chat is ready, then
+  return to Codex Web GPT and choose **Continue**. The launcher captures that session into an
+  owner-only transfer directory, verifies it, and removes the temporary state.
+  - Requires macOS and an installed Google Chrome. The launcher uses `chromeExecutablePath` from
+    setup, otherwise `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
+  - The button appears only on macOS, and only while the launcher has no authenticated session.
+  - Earlier releases had no workaround; the original limitation is
+    [#209](https://github.com/miuuyy/codex-chatgpt-web/issues/209).
 
 If an ordinary login still fails, export a safe log immediately after one attempt. Include the OS,
 launcher version, account tier, sign-in provider, and whether the Temporary Chat composer ever

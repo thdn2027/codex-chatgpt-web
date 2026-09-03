@@ -95,8 +95,19 @@ Sign-in uses that same persistent Electron partition. ChatGPT login pages and al
 provider popups are adopted into a temporary `WebContentsView` inside the launcher instead of being
 redirected to another browser. After the provider returns to ChatGPT, the launcher requires both a
 server-authenticated session and the Temporary Chat composer in the primary owned view, then closes
-the temporary auth view. There is no browser-profile handoff, cookie import, CDP login port, or
-temporary session-transfer directory.
+the temporary auth view. This ordinary path uses no browser-profile handoff, cookie import, CDP login
+port, or temporary session-transfer directory.
+
+macOS passkey sign-in is the one deliberate exception, because Electron cannot answer a platform
+passkey challenge. It is opt-in from the launcher toolbar, offered only on macOS while no session is
+authenticated, and it requires an installed Google Chrome. A dedicated Chrome instance handles the
+challenge in an isolated normal-browser profile; the captured storage state lands in an owner-only
+`0700` transfer directory alongside a capture-evidence marker. The launcher accepts that state only
+when the marker proves a complete capture from that isolated profile within the sign-in window, then
+clears the owned partition, imports the cookies and localStorage into it, and re-verifies the session
+against the live Temporary Chat surface. A failure discards the partially mutated session, and the
+transfer directory is removed either way. No CDP login port is opened, and the session is never
+transferred in the other direction.
 
 The current compiled Codex task context is inserted as one inline JSON envelope. Image bytes stay
 out of the JSON and are attached natively with stable references. The runtime does not create a
@@ -121,6 +132,15 @@ by Codex. A prompt-level checkpoint marker is translated into a visible Codex tr
 every later tool action in the same turn continues to present the current turn capability. Visible
 ChatGPT status rows become reasoning summaries, while stable prose between rows becomes native
 Codex commentary.
+
+Luna has no reasoning selector and therefore no retained-agent compaction, so it uses a separate
+rolling checkpoint instead. Each Luna turn asks for a private structured checkpoint alongside its
+answer, capped at 4,000 tokens. The checkpoint is committed only after the browser answer completes,
+keyed by a hash of that exact answer, and the next turn replays it as one synthetic assistant item in
+place of the earlier history. A checkpoint is applied only when it matches the proven completed parent
+answer and its source turn; a mismatch, a missing native `thread_id`/`turn_id`, or an absent parent
+is skipped with a logged reason rather than guessed at. The optimization may never change which native
+user revision executes, and that is asserted at runtime.
 
 ## Installation and service lifecycle
 
@@ -192,7 +212,9 @@ launcher error.
 ## Security invariants
 
 - Bind the Responses proxy and health endpoint to loopback only.
-- Store browser state and tunnel credentials under the application home with mode `0600`.
+- Write the configuration file, which holds the tunnel credential paths and the control token, with
+  mode `0600`, and keep every private state directory (browser profile, response snapshots, tunnel
+  profile, diagnostics) at mode `0700` under the application home. The broker socket is `0600`.
 - Protect lifecycle control endpoints with a random application-owned bearer token.
 - Never place secret values in command-line arguments, logs, generated profiles, or Git.
 - Limit browser turns to five independent task-bound tabs and reject unsupported models explicitly.
