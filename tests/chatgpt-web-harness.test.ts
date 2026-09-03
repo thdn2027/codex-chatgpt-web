@@ -1045,6 +1045,72 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
+  // Mutation authority must outrank retryability: the browser guards that raise structured
+  // retryable 429/5xx errors (rate-limit dialog, "Something went wrong", subscription failure)
+  // run after the send press as well as before it, so a structured `retryable: true` raised past
+  // the mutation boundary must never authorize another write.
+  for (
+    const submitted of [
+      { phase: "send_activated", code: "chatgpt_submission_ambiguous", accept: false },
+      { phase: "accepted", code: "chatgpt_submitted_turn_failed", accept: true },
+    ] as const
+  ) {
+    for (
+      const upstream of [
+        {
+          label: "a rate-limit dialog",
+          error: () => new ChatGptWebAdapterError("ChatGPT rate limit: too many requests. Try again in a few minutes.", {
+            status: 429,
+            errorType: "rate_limit_error",
+            code: "rate_limit_exceeded",
+            retryable: true,
+          }),
+        },
+        {
+          label: "'Something went wrong'",
+          error: () => new ChatGptWebAdapterError("ChatGPT ended the turn with 'Something went wrong'. Retry the turn.", {
+            status: 502,
+            errorType: "server_error",
+            code: "upstream_server_error",
+            retryable: true,
+          }),
+        },
+      ] as const
+    ) {
+      test(`${upstream.label} raised after ${submitted.phase} never resends the Web prompt`, async () => {
+        const provider: CodexProviderConfig = {
+          adapter: "chatgpt-web",
+          baseUrl: `browser://chatgpt-${submitted.code}-${upstream.error().code}-${Date.now()}`,
+          chatgptWeb: { localToolsEnabled: false, solAvailable: true, proAvailable: true },
+        };
+        const worker = ChatGptBrowserWorker.forProvider(provider);
+        const originalRun = worker.run.bind(worker);
+        let browserStarts = 0;
+        (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+          browserStarts += 1;
+          turn.onSendActivated?.();
+          if (submitted.accept) turn.onSubmitted?.();
+          throw upstream.error();
+        };
+
+        try {
+          const adapter = createChatGptWebAdapter(provider);
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            const events: AdapterEvent[] = [];
+            await adapter.runTurn!(rawWireRequest(environmentXml), { headers: new Headers() }, event => events.push(event));
+            const error = events.at(-1) as Extract<AdapterEvent, { type: "error" }> | undefined;
+            expect(error).toMatchObject({ type: "error", code: submitted.code, retryable: false });
+            // The originating upstream code stays visible so the failure is still diagnosable.
+            expect(error!.message).toContain(upstream.error().code);
+          }
+          expect(browserStarts).toBe(1);
+        } finally {
+          (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+        }
+      });
+    }
+  }
+
   test("an unclassified browser failure retires its session before the next native retry", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-error-retry-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
@@ -1095,9 +1161,11 @@ describe("ChatGPT outer-native harness v4", () => {
     const worker = ChatGptBrowserWorker.forProvider(provider);
     const originalRun = worker.run.bind(worker);
     let browserStarts = 0;
-    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
+    // The rate-limit dialog is also raised while opening the model/effort picker, long before
+    // the send press. A pre-write 429 has no upstream prompt to duplicate, so it keeps its own
+    // retry semantics and the budget still bounds how many sends one native turn may attempt.
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async () => {
       browserStarts += 1;
-      turn.onSendActivated?.();
       throw new ChatGptWebAdapterError("ChatGPT rate limit: too many requests. Try again in a few minutes.", {
         status: 429,
         errorType: "rate_limit_error",

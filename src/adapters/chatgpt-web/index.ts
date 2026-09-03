@@ -204,14 +204,21 @@ function replayEvents(events: AdapterEvent[], emit: (event: AdapterEvent) => voi
 
 function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
-  if (normalized instanceof ChatGptWebAdapterError) return normalized;
   const phase = session.runtime.submission?.phase;
+  // Mutation authority outranks retryability. Once Send has been activated the prompt may
+  // already exist upstream, so no structured `retryable` flag may authorize another write:
+  // the browser guards that raise retryable 429/5xx errors (rate-limit dialog, "Something
+  // went wrong", subscription failure) all run after the send press as well as before it.
+  // Only a pre-write failure keeps its own retry semantics.
   if (!phase || phase === "prepared") return normalized;
   const ambiguous = phase === "send_activated";
+  const cause = normalized instanceof ChatGptWebAdapterError
+    ? `${normalized.message} (${normalized.code})`
+    : normalized.message;
   return new ChatGptWebAdapterError(
     ambiguous
-      ? `ChatGPT Send was activated, but acceptance could not be proven; the prompt will not be resent: ${normalized.message}`
-      : `ChatGPT failed after accepting the Web prompt; the prompt will not be resent: ${normalized.message}`,
+      ? `ChatGPT Send was activated, but acceptance could not be proven; the prompt will not be resent: ${cause}`
+      : `ChatGPT failed after accepting the Web prompt; the prompt will not be resent: ${cause}`,
     {
       status: 502,
       errorType: "server_error",
