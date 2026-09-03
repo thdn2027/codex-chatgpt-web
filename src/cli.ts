@@ -340,7 +340,10 @@ async function agentCommand(args: string[]): Promise<void> {
   const action = args.shift() ?? "inspect";
   assertNoArgs(args);
   if (action !== "inspect") throw new Error("Agent command must be: agent inspect");
-  stdout.write(formatAgentInspection(inspectAgentCapability()));
+  const report = inspectAgentCapability();
+  stdout.write(formatAgentInspection(report));
+  // Same contract as doctor: a diagnostic that always exits 0 cannot gate a script.
+  if (report.warnings.length > 0) process.exitCode = 1;
 }
 
 async function routeCommand(args: string[]): Promise<void> {

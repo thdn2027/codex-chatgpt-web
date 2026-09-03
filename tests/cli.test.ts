@@ -71,6 +71,54 @@ test("passkey capture cannot be invoked outside the live Launcher control channe
   }
 });
 
+test("agent inspect exits non-zero while a routed subagent blocker remains", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-chatgpt-web-cli-agent-inspect-"));
+  const codexHome = join(root, "codex");
+  const appHome = join(root, "app");
+  try {
+    mkdirSync(codexHome, { recursive: true });
+    mkdirSync(appHome, { recursive: true });
+    writeFileSync(join(appHome, "config.json"), `${JSON.stringify({
+      version: 3,
+      releaseVersion: "0.2.0",
+      mode: "browser-only",
+      subagentProtocol: "compatibility-v1",
+      host: "127.0.0.1",
+      port: 17841,
+      contextWindow: 256_000,
+      appName: "Codex Native2",
+      browserHost: "managed-chrome",
+      chromeExecutablePath: process.execPath,
+      storageStatePath: join(appHome, "browser", "storage-state.json"),
+      brokerSocketPath: defaultBrokerEndpoint(appHome),
+      headed: true,
+      solAvailable: true,
+      proAvailable: false,
+      autoApproveToolCalls: false,
+      controlToken: "runtime-control-token-0123456789abcdef0123456789",
+      runtimeCommand: [process.execPath],
+    })}\n`);
+    // Compatibility V1 needs multi_agent on and multi_agent_v2 off; both are wrong here.
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      ["[features]", "multi_agent = false", "multi_agent_v2 = true", ""].join("\n"),
+    );
+    const result = await runCli(["agent", "inspect"], {
+      ...process.env,
+      CODEX_CHATGPT_WEB_HOME: appHome,
+      CODEX_HOME: codexHome,
+    });
+    // A diagnostic that always exits 0 cannot gate a script, so blockers must fail.
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout) as { protocol: string; warnings: string[] };
+    expect(report.protocol).toBe("compatibility-v1");
+    expect(report.warnings).toContain("Codex multi_agent is disabled for Compatibility V1");
+    expect(report.warnings).toContain("Codex multi_agent_v2 is enabled for Compatibility V1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("DEV chat list works without starting launcher, broker, or Responses services", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-chatgpt-web-cli-dev-list-"));
   try {
